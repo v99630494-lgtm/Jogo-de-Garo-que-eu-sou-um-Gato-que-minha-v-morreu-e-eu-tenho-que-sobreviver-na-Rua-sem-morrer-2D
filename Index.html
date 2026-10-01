@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-select=none">
+    <title>A Jornada de um Gato: Sobreviva às Ruas</title>
+    <style>
+        body {
+            margin: 0; padding: 0; overflow: hidden;
+            background-color: #1a1a24; font-family: 'Segoe UI', Arial, sans-serif;
+        }
+        #game-container {
+            position: relative; width: 100vw; height: 100vh;
+            display: flex; justify-content: center; align-items: center;
+        }
+        canvas {
+            background-color: #3a3d52;
+            box-shadow: 0 0 25px rgba(0,0,0,0.7);
+            max-width: 100%; max-height: 100%;
+        }
+        /* Telas de Menu e Game Over */
+        .overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(15, 15, 25, 0.9); display: flex; flex-direction: column;
+            justify-content: center; align-items: center; color: white;
+            z-index: 30; text-align: center; padding: 20px; box-sizing: border-box;
+            transition: opacity 0.3s ease;
+        }
+        .hidden { display: none !none; opacity: 0; pointer-events: none; }
+        h1 { color: #ffcc00; font-size: 28px; margin-bottom: 10px; }
+        p { color: #ccc; font-size: 16px; max-width: 400px; line-height: 1.5; margin-bottom: 20px; }
+        .btn {
+            background: #ffcc00; border: none; color: #111; padding: 12px 30px;
+            font-size: 18px; font-weight: bold; border-radius: 25px; cursor: pointer;
+            box-shadow: 0 4px 15px rgba(255, 204, 0, 0.4);
+        }
+        /* Controles Virtuais Mobiles */
+        #mobile-controls {
+            position: absolute; bottom: 30px; left: 0; width: 100%;
+            display: flex; justify-content: space-between; padding: 0 40px;
+            box-sizing: border-box; z-index: 20; pointer-events: none;
+        }
+        .btn-ctrl {
+            width: 70px; height: 70px; background: rgba(255, 255, 255, 0.2);
+            border: 2px solid rgba(255, 255, 255, 0.5); border-radius: 50%;
+            color: white; font-size: 28px; display: flex; align-items: center;
+            justify-content: center; pointer-events: auto; backdrop-filter: blur(5px);
+        }
+        .btn-ctrl:active { background: rgba(255, 204, 0, 0.5); border-color: #ffcc00; }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <canvas id="gameCanvas" width="400" height="600"></canvas>
+
+        <!-- Menu Inicial Contextualizado -->
+        <div id="start-screen" class="overlay">
+            <h1>A Jornada do Gatinho</h1>
+            <p>Sua vovó faleceu e agora você ficou sozinho no mundo. Encontre comida nas calçadas e tome muito cuidado ao atravessar as ruas movimentadas!</p>
+            <button class="btn" onclick="startGame()">COMEÇAR JORNADA</button>
+        </div>
+
+        <!-- Tela de Fim de Jogo -->
+        <div id="game-over-screen" class="overlay" style="display: none;">
+            <h1 style="color: #ff3333;">FIM DA JORNADA</h1>
+            <p>Suas 7 vidas chegaram ao fim nas ruas frias da cidade...</p>
+            <p style="font-size: 20px;">Você sobreviveu por: <b id="final-score" style="color:#ffcc00">0</b> segundos</p>
+            <button class="btn" onclick="restartGame()">TENTAR NOVAMENTE</button>
+        </div>
+
+        <!-- Controles para Celular -->
+        <div id="mobile-controls">
+            <div class="btn-ctrl" id="m-left">◀</div>
+            <div class="btn-ctrl" id="m-right">▶</div>
+        </div>
+    </div>
+
+<script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+
+    // Estados e variáveis do jogo
+    let gameActive = false;
+    let score = 0;
+    let scoreInterval;
+    
+    let cat = {
+        x: 185, y: 500,
+        width: 30, height: 30,
+        speed: 5, lives: 7,
+        hunger: 100 // Começa com 100% cheio
+    };
+
+    let keys = { left: false, right: false };
+    let obstacles = []; // Carros inimigos
+    let foods = []; // Comidas descartadas nas ruas
+
+    // Configuração dos controles mobile
+    document.getElementById("m-left").addEventListener("touchstart", (e) => { e.preventDefault(); keys.left = true; });
+    document.getElementById("m-left").addEventListener("touchend", () => keys.left = false);
+    document.getElementById("m-right").addEventListener("touchstart", (e) => { e.preventDefault(); keys.right = true; });
+    document.getElementById("m-right").addEventListener("touchend", () => keys.right = false);
+
+    // Controles de Teclado (PC)
+    document.addEventListener("keydown", e => {
+        if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") keys.left = true;
+        if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") keys.right = true;
+    });
+    document.addEventListener("keyup", e => {
+        if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") keys.left = false;
+        if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") keys.right = false;
+    });
+
+    function spawnCar() {
+        if (!gameActive) return;
+        // Carros surgem no topo da rua e descem
+        let lanes =;
+        let randomLane = lanes[Math.floor(Math.random() * lanes.length)];
+        let carColors = ["#ff3333", "#3355ff", "#ffffff", "#222222"];
+        
+        obstacles.push({
+            x: randomLane,
+            y: -80,
+            width: 35,
+            height: 70,
+            speed: 3 + Math.random() * 4,
+            color: carColors[Math.floor(Math.random() * carColors.length)]
+        });
+        
+        // Sorteia próximo carro entre 1 e 2.5 segundos
+        setTimeout(spawnCar, 1000 + Math.random() * 1500);
+    }
+
+    function spawnFood() {
+        if (!gameActive) return;
+        foods.push({
+            x: 20 + Math.random() * (canvas.width - 50),
+            y: -20,
+            width: 20,
+            height: 20,
+            speed: 2
+        });
+        setTimeout(spawnFood, 3000 + Math.random() * 2000);
+    }
+
+    function startGame() {
+        document.getElementById("start-screen").style.display = "none";
+        gameActive = true;
+        score = 0;
+        
+        scoreInterval = setInterval(() => {
+            if (gameActive) score++;
+        }, 1000);
+
+        spawnCar();
+        spawnFood();
+        gameLoop();
+    }
+
+    function update() {
+        if (!gameActive) return;
+
+        // Movimento lateral do gato com limite de tela
+        if (keys.left && cat.x > 10) cat.x -= cat.speed;
+        if (keys.right && cat.x < canvas.width - cat.width - 10) cat.x += cat.speed;
+
+        // Fome consumindo ao longo do tempo
+        cat.hunger -= 0.05;
+        if (cat.hunger <= 0) {
+            cat.hunger = 100;
+            cat.lives--; // Perde uma vida se a fome zerar
+        }
+
+        // Atualizar Carros (Obstáculos)
+        for (let i = obstacles.length - 1; i >= 0; i--) {
+            obstacles[i].y += obstacles[i].speed;
+
+            // Detecção de colisão com carro
+            if (
+                cat.x < obstacles[i].x + obstacles[i].width &&
+                cat.x + cat.width > obstacles[i].x &&
+                cat.y < obstacles[i].y + obstacles[i].height &&
+                cat.y + cat.height > obstacles[i].y
+            ) {
+                cat.lives--;
+                obstacles.splice(i, 1); // Remove o carro que bateu
+                continue;
+            }
+
+            // Remove se saiu da tela
+            if (obstacles[i].y > canvas.height) {
+                obstacles.splice(i, 1);
+            }
+        }
+
+        // Atualizar Comidas
+        for (let i = foods.length - 1; i >= 0; i--) {
+            foods[i].y += foods[i].speed;
+
+            // Coletar comida
+            if (
+                cat.x < foods[i].x + foods[i].width &&
+                cat.x + cat.width > foods[i].x &&
+                cat.y < foods[i].y + foods[i].height &&
+                cat.y + cat.height > foods[i].y
+            ) {
+                cat.hunger = Math.min(100, cat.hunger + 30); // Enche até 100%
+                foods.splice(i, 1);
+                continue;
+            }
+
+            if (foods[i].y > canvas.height) {
+                foods.splice(i, 1);
+            }
+        }
+
+        // Condição de derrota definitiva
+        if (cat.lives <= 0) {
+            gameActive = false;
+            clearInterval(scoreInterval);
+            document.getElementById("final-score").innerText = score;
+            document.getElementById("game-over-screen").style.display = "flex";
+        }
+    }
+
+    function draw() {
+        // Limpar tela (Asfalto da rua)
+        ctx.fillStyle = "#3a3d52";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Desenhar Calçadas Laterais (Áreas seguras)
+        ctx.fillStyle = "#70758a";
+        ctx.fillRect(0, 0, 40, canvas.height);
+        ctx.fillRect(canvas.width - 40, 0, 40, canvas.height);
+
+        // Faixas divisórias amarelas da avenida
+        ctx.strokeStyle = "#ffcc00";
+        ctx.lineWidth = 4;
+        ctx.setLineDash([20, 20]);
+        ctx.beginPath();
+        ctx.moveTo(130, 0); ctx.lineTo(130, canvas.height);
+        ctx.moveTo(260, 0); ctx.lineTo(260, canvas.height);
+        ctx.stroke();
+        ctx.setLineDash([]); // Reseta estilo de linha
+
+        // Desenhar Comidas (Espinhas de Peixe)
+        ctx.fillStyle = "#e6e6fa";
+        foods.forEach(f => {
+            ctx.fillRect(f.x, f.y, f.width, f.height);
+            // Desenho simples de espinha
+            ctx.fillStyle = "#aaa";
+            ctx.fillRect(f.x + 8, f.y, 4, f.height);
+            ctx.fillRect(f.x, f.y + 8, f.width, 4);
+            ctx.fillStyle = "#e6e6fa";
+        });
+
+        // Desenhar Carros (Obstáculos)
+        obstacles.forEach(car => {
+            ctx.fillStyle = car.color;
+            ctx.fillRect(car.x, car.y, car.width, car.height);
+            // Faróis acesos dos carros
